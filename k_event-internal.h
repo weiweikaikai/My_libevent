@@ -10,9 +10,12 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include"k_config.h"
-//#include"k_min_heap.h"
-//#include"k_evsignal.h"
+//#include"k_config.h"
+#include"k_min_heap.h"
+#include"k_evsignal.h"
+
+
+
 
 struct eventop  //事件操作结构体
 {
@@ -44,18 +47,18 @@ struct eventop  //事件操作结构体
         struct event_list **activequeues; /* active event management 
 		                                  是一个二级指针，libevent支持事件优先级，
 		                                  因此你可以把它看作是数组，
-		                                  其中的元素activequeues[priority]是一个链表，
+		                                  其中的元素activequeues[priority]是一个链表的管理结构体指针，
 		                                  链表的每个节点指向一个优先级为priority的就绪事件event*/
-	    int nactivequeues;
+	    int nactivequeues;             //活动队列个数
 	    struct evsignal_info sig;     /* signal handling info 
 	                                    用来管理信号的结构体对象 在Evsignal.h中*/
 
-	     struct event_list eventqueue;
-	     struct timeval event_tv;
+	     struct event_list eventqueue;  //事件队列使用宏实现的双向链表
+	     struct timeval event_tv; //dispathc()函数返回的时间 也就是IO时间就绪的时间
 
-	     //struct min_heap timeheap;  //管理定时事件的小根堆对象
+	     struct min_heap timeheap;  //管理定时事件的小根堆对象
 
-	     struct timeval tv_cache;   
+	     //struct timeval tv_cache;  //时间缓存
  };
 
 
