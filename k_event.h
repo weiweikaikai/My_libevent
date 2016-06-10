@@ -12,21 +12,33 @@
 extern "C"{
 #endif
 
-#include <event-config.h>
+#include "k_event-config.h"
+#include"k_evutil.h"
+
+
 #ifdef _EVENT_HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
+
 #ifdef _EVENT_HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
 
-#define TAILQ_ENTRY(type)						\
-struct {								\
-	struct type *tqe_next;	/* next element */			\
-	struct type **tqe_prev;	/* address of previous next element */	\
-}
-struct event_base;
-#ifndef EVENT_NO_STRUCT
+/*
+用于标记当前event处于什么状态 
+比如：在time堆中， 
+在注册事件链表中，在激活链表中
+*/
+#define EVLIST_TIMEOUT 0x01 // event在time堆中  
+#define EVLIST_INSERTED 0x02 // event在已注册事件链表中  
+#define EVLIST_SIGNAL 0x04 // 未见使用  
+#define EVLIST_ACTIVE 0x08 // event在激活链表中  
+#define EVLIST_INTERNAL 0x10 // 内部使用标记  
+#define EVLIST_INIT     0x80 // event已被初始化 
+
+
+struct event_base; //struct event_base 定义一下
+
 struct event {
 	TAILQ_ENTRY (event) ev_next;
 	TAILQ_ENTRY (event) ev_active_next;

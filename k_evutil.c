@@ -1,11 +1,14 @@
 /*************************************************************************
-	> File Name: k_event-config.h
+	> File Name: k_evutil.c
 	> Author: wk
 	> Mail: 18402927708@163.com
-	> Created Time: Sat 14 May 2016 10:15:13 PM CST
+	> Created Time: Thu 09 Jun 2016 03:10:03 PM CST
  ************************************************************************/
 
-#ifndef _K_EVENT-CONFIG_H
-#define _K_EVENT-CONFIG_H
+#include<stdio.h>
+ 
+int main()
+{
+    return 0;
+}
 
-#endif

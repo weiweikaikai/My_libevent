@@ -1,11 +1,10 @@
 /*************************************************************************
-	> File Name: k_event-config.h
+	> File Name: k_evsignal.h
 	> Author: wk
 	> Mail: 18402927708@163.com
-	> Created Time: Sat 14 May 2016 10:15:13 PM CST
+	> Created Time: Thu 09 Jun 2016 03:30:03 PM CST
  ************************************************************************/
 
-#ifndef _K_EVENT-CONFIG_H
-#define _K_EVENT-CONFIG_H
-
+#ifndef _K_EVSIGNAL_H
+#define _K_EVSIGNAL_H
 #endif
