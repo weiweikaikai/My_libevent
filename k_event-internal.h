@@ -5,8 +5,9 @@
 	> Created Time: Thu 09 Jun 2016 03:18:11 PM CST
  ************************************************************************/
 
-#ifndef _K_EVENT-INTERNAL_H
-#define _K_EVENT-INTERNAL_H
+#ifndef _K_EVENT_INTERNAL_H
+#define _K_EVENT_INTERNAL_H
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -60,6 +61,9 @@ struct eventop  //事件操作结构体
 
 	     //struct timeval tv_cache;  //时间缓存
  };
+
+#define	TAILQ_FIRST(head)		((head)->tqh_first)
+#define	TAILQ_END(head)			NULL
 
 
 #ifdef __cplusplus

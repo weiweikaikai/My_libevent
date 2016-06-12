@@ -26,6 +26,9 @@
 #include "k_evsignal.h"
 #include "k_evutil.h"
 
+struct event_base *evsignal_base = NULL;
+static void evsignal_handler(int sig);
+
 
 static void evsignal_cb(int fd, short what, void *arg)
 {
@@ -82,3 +85,17 @@ int evsignal_init(struct event_base *base)
 	return 0;
 }
 
+int evsignal_add(struct event *ev)
+{
+    return 1;
+}
+
+
+void evsignal_process(struct event_base *base)
+{
+   
+}
+void evsignal_dealloc(struct event_base *base)
+{
+  
+}

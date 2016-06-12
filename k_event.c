@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include<unistd.h>
+#include<stdio.h>
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
@@ -38,7 +39,132 @@ extern struct event_base *evsignal_base; //用于信号使用的 struct event_ba
 //static int use_monotonic;  //  Monotonic时间指示的是系统从boot后到现在所经过的时间，
                           //如果系统支持Monotonic时间就将全局变量use_monotonic设置为1
 
+int (*event_sigcb)(void);		/* Signal callback when gotsig is set */
+volatile sig_atomic_t event_gotsig;	/* Set in signal handler  是一个原子操作*/
 
+static void	event_queue_insert(struct event_base *, struct event *, int);
+static void	event_queue_remove(struct event_base *, struct event *, int);
+static int	event_haveevents(struct event_base *);//是否有事件
+static int	timeout_next(struct event_base *, struct timeval **);
+static void	timeout_process(struct event_base *);
+static void	event_process_active(struct event_base *);
+
+
+int timeout_next(struct event_base *base, struct timeval **tv_p)
+{
+         struct timeval now;
+	     struct event *ev;
+	     struct timeval *tv = *tv_p;
+		 if ((ev = min_heap_top(&base->timeheap)) == NULL)
+		{
+		/* if no time-based events are active wait for I/O */
+		     *tv_p = NULL;
+		     return (0);
+	    }
+
+	    if (gettimeofday(&now,0) == -1)
+		{
+		    return (-1);
+		}
+
+	    if (evutil_timercmp(&ev->ev_timeout, &now, <=)) //如果当前时刻已经大于等于事件超时时间
+	    {
+		       evutil_timerclear(tv);//已经超时就将事件的时间清空
+		       return (0);
+	    }
+
+	     evutil_timersub(&ev->ev_timeout, &now, tv);
+
+	       assert(tv->tv_sec >= 0);
+	       assert(tv->tv_usec >= 0);
+
+	       //printf("timeout_next: in %ld seconds\n", tv->tv_sec);
+	return (0);
+}
+int event_haveevents(struct event_base *base)
+{
+	return (base->event_count > 0);
+}
+
+void event_active(struct event *ev, int res, short ncalls)
+{
+	//不同类型的事件 只要处于活跃的状态中
+    if (ev->ev_flags & EVLIST_ACTIVE) 
+	{
+		ev->ev_res |= res;
+		return;
+	}
+
+    ev->ev_res = res;
+	ev->ev_ncalls = ncalls;
+	ev->ev_pncalls = NULL;
+	event_queue_insert(ev->ev_base, ev, EVLIST_ACTIVE);   
+}
+
+ void event_process_active(struct event_base *base)
+ {
+     struct event *ev;
+	struct event_list *activeq = NULL;
+	int i;
+	short ncalls;
+
+ 	for (i = 0; i < base->nactivequeues; ++i)
+	 {
+		if (TAILQ_FIRST(base->activequeues[i]) != NULL)
+		{
+			activeq = base->activequeues[i];
+			break;
+		}
+	}
+		assert(activeq != NULL);
+		for (ev = TAILQ_FIRST(activeq); ev; ev = TAILQ_FIRST(activeq))
+		 {
+		      if (ev->ev_events & EV_PERSIST) //事件是一个永久事件，只是从队列中移除
+			 {
+			    event_queue_remove(base, ev, EVLIST_ACTIVE);
+			 }
+		      else //否则可能会被在IO复用监听中被移除
+			 {
+			    event_del(ev);
+			 }
+			 	/* Allows deletes to work */
+		ncalls = ev->ev_ncalls;
+		ev->ev_pncalls = &ncalls;
+		while (ncalls)
+			{
+			    ncalls--;
+			    ev->ev_ncalls = ncalls;
+			    (*ev->ev_callback)((int)ev->ev_fd, ev->ev_res, ev->ev_arg);
+			    if (event_gotsig || base->event_break) 
+					{
+			  	      ev->ev_pncalls = NULL;
+				      return;
+			        }
+		    }
+			ev->ev_pncalls = NULL;
+	   	}
+ }
+void timeout_process(struct event_base *base)
+{
+      struct timeval now;
+	  struct event *ev;
+
+	  if(min_heap_empty(&base->timeheap))//二叉堆是空的
+	   {
+		  return;
+	   }
+	   gettimeofday(&now,0);
+	   while ((ev = min_heap_top(&base->timeheap)))
+		  {
+		     if(evutil_timercmp(&ev->ev_timeout, &now, >)) //如果还没有超时
+			  {
+			     break; //就直接退出
+			  }
+			  /* delete this event from the I/O queues */
+		         event_del(ev);
+				 event_active(ev, EV_TIMEOUT, 1);
+		   }
+}
 
 struct event_base* event_init(void)
 {
@@ -68,14 +194,15 @@ struct event_base* event_base_new(void)
 	 min_heap_ctor(&base->timeheap);//初始化事件超时小根堆
      TAILQ_INIT(&base->eventqueue);//初始化链表管理结构体
       
-	  base->sig.ev_signal_pair[0] = -1; //初始化socketpair管道
+	  base->sig.ev_signal_pair[0] = -1; //初始化socketpair管道 用于在统一信号事件源时候作为通知机制
 	  base->sig.ev_signal_pair[1] = -1;
 
 	  base->evbase = NULL;
 	  for (i = 0; eventops[i] && !base->evbase; i++) 
 	{
 		base->evsel = eventops[i]; //IO复用结构体指针赋值给base->evsel
-		base->evbase = base->evsel->init(base);
+		base->evbase = base->evsel->init(base);  //返回的是一个被转换为void*的具体的IO复用op
+		printf("IO multiplexing function: %s\n",base->evsel->name);
 	}
 	if (base->evbase == NULL)
 	{
@@ -142,7 +269,7 @@ struct event_base* event_base_new(void)
 	ev->ev_ncalls = 0;
 	ev->ev_pncalls = NULL;
 
-	min_heap_elem_init(ev);
+	min_heap_elem_init(ev); //小堆
 
 	/* by default, we put new events into the middle priority */
 	if(current_base) //默认优先级插入是往中间插入
@@ -150,3 +277,255 @@ struct event_base* event_base_new(void)
 		ev->ev_pri = current_base->nactivequeues/2;
 	}
 }
+int event_add(struct event *ev, const struct timeval *timeout)
+{
+    struct event_base *base = ev->ev_base; //事件中的struct event_base 结构体也就是Reactor模式的主体
+	const struct eventop *evsel = base->evsel; //事件操作结构体指针，内部全是函数指针
+	void *evbase = base->evbase;//用于在函数指针中作为事件操作结构体指针进行传递
+    int res=0;
+
+	 assert(!(ev->ev_flags & ~EVLIST_ALL));
+   
+   //超时事件在二叉堆中的插入
+
+   if(timeout != NULL && !(ev->ev_flags & EVLIST_TIMEOUT) ) //如果这个超时事件没有在二叉堆中就进行插入，否则不做任何事
+   {
+       if (min_heap_reserve(&base->timeheap,1 + min_heap_size(&base->timeheap)) == -1)
+	      {//分配失败  ENOMEM == errno
+	        return (-1);
+		  }
+   }
+   //读事件写事件 信号事件没有插入队列中才准备插入
+   if ((ev->ev_events & (EV_READ|EV_WRITE|EV_SIGNAL)) &&
+	    !(ev->ev_flags & (EVLIST_INSERTED|EVLIST_ACTIVE)))
+	{
+         res = evsel->add(evbase, ev);//活跃的首先加入IO复用的管理中
+		if (res != -1)
+			{
+			event_queue_insert(base, ev, EVLIST_INSERTED);
+			}
+    }
+	//只有在前边添加事件成功的时候再改变超时状态
+    if(res != -1 && timeout != NULL)
+	{
+	  struct timeval now; 
+	  //如果当前要添加的事件已经在超时队列中，删除原来的超时事件
+	  if(ev->ev_flags & EVLIST_TIMEOUT)
+		{
+	      event_queue_remove(base, ev, EVLIST_TIMEOUT);
+	    }
+		//事件在活动队列中 而且时间超时返回了
+       if ((ev->ev_flags & EVLIST_ACTIVE) && (ev->ev_res & EV_TIMEOUT)) 
+		  {
+		   //检查是否在一个循环中执行就是只执行了回调函数一次
+		    if (ev->ev_ncalls && ev->ev_pncalls) 
+			{
+			    *ev->ev_pncalls = 0;//将执行函数次数的记录清零(ev->ev_ncalls清零)
+			}
+			event_queue_remove(base, ev, EVLIST_ACTIVE);//将事件从活跃队列中移除
+		  }
+         gettimeofday(&now,0);
+		 evutil_timeradd(&now,timeout,&ev->ev_timeout);
+		 event_queue_insert(base, ev, EVLIST_TIMEOUT);//将新的事件加入超时队列
+	}
+	return (res);
+}
+
+int event_del(struct event *ev)
+{
+	struct event_base *base;
+	const struct eventop *evsel;
+	void *evbase;
+    if(ev->ev_base == NULL)
+		{
+		  return (-1);
+		}
+     base = ev->ev_base;
+	 evsel = base->evsel;
+	 evbase = base->evbase;
+
+    assert(!(ev->ev_flags & ~EVLIST_ALL)); //有一个队列存在
+     //看是否只是在一个循环中执行这个时间
+	if (ev->ev_ncalls && ev->ev_pncalls) 
+		{
+		  *ev->ev_pncalls = 0;
+	    }
+	if (ev->ev_flags & EVLIST_TIMEOUT)
+		{
+	    	event_queue_remove(base, ev, EVLIST_TIMEOUT);
+		}
+
+	if (ev->ev_flags & EVLIST_ACTIVE)
+		{
+		    event_queue_remove(base, ev, EVLIST_ACTIVE);
+		}
+    if (ev->ev_flags & EVLIST_INSERTED)//如果要删除注册队列中的那就要在IO复用监听中也要删除这个事件
+	    {
+		     event_queue_remove(base, ev, EVLIST_INSERTED);
+		     return (evsel->del(evbase, ev));
+	    }    
+          return (0);
+}
+
+void event_queue_insert(struct event_base *base, struct event *ev, int queue)
+{
+       if(ev->ev_flags & queue) //如果事件在规定的queue队列中
+		 {
+			 //活跃事件容易出现二次插入，就直接返回
+            	if (queue & EVLIST_ACTIVE)
+			       {
+			        return;
+				   }
+		 }
+		 //无论是那种事件，事件总数加1
+        if (~ev->ev_flags & EVLIST_INTERNAL)
+	   { 
+	     	base->event_count++;
+	   }
+        ev->ev_flags |= queue;//当前时间被标记为queue所指的队列
+       
+	switch (queue)
+		{
+	case EVLIST_INSERTED:
+		TAILQ_INSERT_TAIL(&base->eventqueue, ev, ev_next);
+		break;
+	case EVLIST_ACTIVE:
+		base->event_count_active++;
+		TAILQ_INSERT_TAIL(base->activequeues[ev->ev_pri],
+		    ev,ev_active_next);
+		break;
+		case EVLIST_TIMEOUT: 
+			{
+		      min_heap_push(&base->timeheap, ev);
+		      break;
+	        }
+	default:
+		printf("unknown queue ");
+		}
+
+}
+void event_queue_remove(struct event_base *base, struct event *ev, int queue)
+{
+        if (!(ev->ev_flags & queue))//不存在queue类型这种队列
+	     {
+		     printf("not exist this queue\n");   
+			 return;
+		 }
+		 if (~ev->ev_flags & EVLIST_INTERNAL) //不管这个时间的类型是什么总的事件个数减1
+	      {
+		      base->event_count--;
+		  }
+		  ev->ev_flags &= ~queue;//将时间类型标志清零
+          switch (queue)
+			  {
+	             case EVLIST_INSERTED:
+		               TAILQ_REMOVE(&base->eventqueue, ev, ev_next);
+		               break;
+	             case EVLIST_ACTIVE:
+		               base->event_count_active--;//活跃事件数减1
+		               TAILQ_REMOVE(base->activequeues[ev->ev_pri],ev, ev_active_next);
+		               break;
+	             case EVLIST_TIMEOUT:
+		               min_heap_erase(&base->timeheap, ev);
+		               break;
+	             default:
+		            printf("unknown queue\n");
+	}
+  
+}
+
+int event_dispatch(void)
+{
+	return (event_loop(0));
+}
+
+int event_loop(int flags)
+{
+	return event_base_loop(current_base, flags);
+}
+
+int event_base_loop(struct event_base *base, int flags)
+{
+	
+	const struct eventop *evsel = base->evsel;
+	void *evbase = base->evbase;
+
+	struct timeval tv;
+	struct timeval *tv_p;
+	int res=0;
+	if (base->sig.ev_signal_added)
+	{
+		evsignal_base = base;
+	}
+	while(1)
+	{
+	   	if (base->event_gotterm)//如果设置了终止
+		{
+			base->event_gotterm = 0;
+			break;
+		}
+		if (base->event_break) 
+		{
+			base->event_break = 0;
+			break;
+		}
+		/* You cannot use this interface for multi-threaded apps */
+		while (event_gotsig) //如果event_gotsig被设置就调用回调函数
+		{
+			event_gotsig = 0;
+			if (event_sigcb) 
+			{
+				res = (*event_sigcb)();
+				if (res == -1)
+				{
+					errno = EINTR; //如果被中断就直接返回
+					return (-1);
+				}
+			}
+		}
+	      //因为使用了单调时间这里就不用再核对时间的正确性了
+		  tv_p = &tv;
+      if (!base->event_count_active && !(flags & EVLOOP_NONBLOCK)) //如果当前时间没有事件处于激活状态且不是非阻塞的
+		  {
+		    	timeout_next(base, &tv_p);//就获下一个时间超时时间
+		  }
+	  else
+		{
+		  /* 
+			if we have active events, we just poll new event without waiting.
+		  */
+	      evutil_timerclear(&tv);  
+	    }
+			/* If we have no events, we just exit */
+		if (!event_haveevents(base))
+		{
+			printf("no events registered.\n");
+			return (1);
+		}
+		/* update last old time */
+		gettimeofday(&base->event_tv,0);
+
+		res = evsel->dispatch(base, evbase, tv_p);
+        if (res == -1)
+		{
+			return (-1);
+		}
+		timeout_process(base);
+		if (base->event_count_active)
+		{
+			event_process_active(base);
+		   if (!base->event_count_active && (flags & EVLOOP_ONCE))
+			  {
+		        break;	
+			  }
+				
+		} 
+		else if (flags & EVLOOP_NONBLOCK)
+		{
+			break;
+		}
+	}
+
+    return 0;
+}
+

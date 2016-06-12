@@ -34,4 +34,29 @@ struct {								\
 } while (0)
 
 
+/*每次都是尾插元素
+新插入元素的next指针域总是为空
+新插入元素的prev指针是个二级指针 
+链表的管理节点的last指针也是一个二级指针，
+链表管理节点的last指针(二级指针)已经被初始化为自己first指针的地址
+将链表管理节点的last指针(二级指针)赋值给新插入的节点的prev指针
+链表的last指针简引用就是最后一个节点的next指针，next指针指向新插入的元素
+链表管理节点的last指针(二级指针)被重新定义为新节点的next指针的地址
+*/
+#define TAILQ_INSERT_TAIL(head, elm, field) do {			\
+	(elm)->field.tqe_next = NULL;					\
+	(elm)->field.tqe_prev = (head)->tqh_last;			\
+	*(head)->tqh_last = (elm);					\
+	(head)->tqh_last = &(elm)->field.tqe_next;			\
+} while (0)
+
+
+#define TAILQ_REMOVE(head, elm, field) do {				\
+	if (((elm)->field.tqe_next) != NULL)				\
+		(elm)->field.tqe_next->field.tqe_prev =			\
+		    (elm)->field.tqe_prev;				\
+	else								\
+		(head)->tqh_last = (elm)->field.tqe_prev;		\
+	*(elm)->field.tqe_prev = (elm)->field.tqe_next;			\
+} while (0)
 #endif

@@ -48,3 +48,32 @@ const struct eventop pollops = {
 	poll_dealloc,
     0
 };
+
+static void poll_check_ok(struct pollop *pop);
+static void *poll_init	(struct event_base *);
+static int poll_add		(void *, struct event *);
+static int poll_del		(void *, struct event *);
+static int poll_dispatch	(struct event_base *, void *, struct timeval *);
+static void poll_dealloc	(struct event_base *, void *);
+
+
+static void * poll_init(struct event_base *base)
+{
+   
+}
+static int poll_add(void *arg, struct event *ev)
+{
+    return 0;
+}
+static int poll_del(void *arg, struct event *ev)
+{
+     return 0;
+}
+static int poll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
+{
+    return 0;
+}
+static void poll_dealloc(struct event_base *base, void *arg)
+{
+    
+}

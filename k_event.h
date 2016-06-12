@@ -16,6 +16,7 @@ extern "C"{
 #include"k_evutil.h"
 #include"k_queue.h"
 
+
 #include <sys/types.h>
 #include <sys/time.h>
 
@@ -32,11 +33,14 @@ extern "C"{
 #define EVLIST_INTERNAL 0x10 // 内部使用标记  
 #define EVLIST_INIT     0x80 // event已被初始化 
 
-#define EV_TIMEOUT	0x01
-#define EV_READ		0x02
-#define EV_WRITE	0x04
-#define EV_SIGNAL	0x08
-#define EV_PERSIST	0x10	/* Persistant event */
+#define EVLIST_ALL	(0xf000 | 0x9f)
+
+//事件类型
+#define EV_TIMEOUT	0x01 //超时事件
+#define EV_READ		0x02 //读事件
+#define EV_WRITE	0x04 //写时间
+#define EV_SIGNAL	0x08 //信号事件
+#define EV_PERSIST	0x10	/* Persistant event  辅助选项 永久事件*/ 
 
 //#define TAILQ_ENTRY(type)						\
 //struct {								\
@@ -61,14 +65,14 @@ struct event {
 	short ev_ncalls;//记录当事件就绪时候ev_callback被执行的次数 通常是1
 	short *ev_pncalls;	/* Allows deletes in callback */
 
-	struct timeval ev_timeout;
+	struct timeval ev_timeout; //ev_timeout是事件超时值
 
 	int ev_pri;		/* smaller numbers are higher priority  事件优先级*/
 
 	void (*ev_callback)(int, short, void *arg);//函数指针，event的回调函数，被ev_base 也就是反应堆实例进行调用执行事件处理函数
 	void *ev_arg;//设置event的回调函数时候传入的参数，void表明可以是任意类型的数据
 
-	int ev_res;		/* result passed to event callback */
+	int ev_res;		/* result passed to event callback */  //返回的事件是什么状态，是超时还是其他
 	int ev_flags;//用于标记当前event处于什么状态 比如：在time堆中， 在注册事件链表中，在激活链表中
 };
 
@@ -91,9 +95,20 @@ int	event_base_priority_init(struct event_base *, int);
 
 #define evtimer_set(ev, cb, arg)	event_set(ev, -1, 0, cb, arg)
 void event_set(struct event *, int, short, void (*)(int, short, void *), void *);
+/*
+event_loop() flags
+*/
+#define EVLOOP_ONCE	0x01	/**< Block at most once. */
+#define EVLOOP_NONBLOCK	0x02	/**< Do not block. */
+int event_loop(int);
 
+#define evtimer_add(ev, tv)		event_add(ev, tv)
 int event_add(struct event *ev, const struct timeval *timeout);
 
+#define evtimer_del(ev)			event_del(ev)
+int event_del(struct event *);
+
+void event_active(struct event *, int, short);
 int event_dispatch(void);
 
 

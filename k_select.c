@@ -52,3 +52,49 @@ const struct eventop selectops = {
 	select_dealloc,
 	0
 };
+
+static int select_resize(struct selectop *sop, int fdsz);
+static void check_selectop(struct selectop *sop);
+
+static void *select_init(struct event_base *base);
+static int select_add(void *arg, struct event *ev);
+static int  select_del(void *arg, struct event *ev);
+static int select_dispatch(struct event_base *base, void *arg, struct timeval *tv);
+static void select_dealloc(struct event_base *base, void *arg);
+
+
+static int select_resize(struct selectop *sop, int fdsz)
+{
+
+  return 0;
+}
+
+static void check_selectop(struct selectop *sop)
+{
+      
+}
+
+static void *select_init(struct event_base *base)
+{
+      
+}
+static int select_add(void *arg, struct event *ev)
+{
+    return 1;
+}
+
+static int  select_del(void *arg, struct event *ev)
+{
+     return 1;
+ 
+}
+static int select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
+{
+
+  return 0;
+}
+
+static void select_dealloc(struct event_base *base, void *arg)
+{
+    
+}

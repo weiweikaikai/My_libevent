@@ -96,6 +96,16 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 }
 
 
+
+
+static void *epoll_init(struct event_base *base);
+static int epoll_add(void *arg, struct event *ev);
+static int epoll_del(void *arg, struct event *ev);
+static int epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv);
+static void epoll_dealloc(struct event_base *base, void *arg);
+
+
+
 static void *epoll_init(struct event_base *base)
 {
    int epfd;
@@ -124,7 +134,6 @@ static void *epoll_init(struct event_base *base)
 	}
     epollop->nfds = INITIAL_NFILES;
 	evsignal_init(base);
-    printf("epoll\n");
 	return (epollop);
 }
 static int epoll_add(void *arg, struct event *ev)
