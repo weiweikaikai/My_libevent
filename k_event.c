@@ -25,8 +25,8 @@ extern const struct eventop epollops;
 
 static const struct eventop *eventops[] = {
 	&epollops,
-	//&pollops,
-	//&selectops,
+	&pollops,
+	&selectops,
 	NULL
 };
 
@@ -253,6 +253,21 @@ struct event_base* event_base_new(void)
 	   }
         return 0;
  }
+
+int event_base_set(struct event_base *base, struct event *ev)
+{
+	/* Only innocent events may be assigned to a different base */
+	if (ev->ev_flags != EVLIST_INIT)
+	{
+		return (-1);
+	}
+
+	ev->ev_base = base;
+	ev->ev_pri = base->nactivequeues/2;
+
+	return (0);
+}
+
 
  void event_set(struct event *ev, int fd, short events,
 	  void (*callback)(int, short, void *), void *arg)

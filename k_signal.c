@@ -29,6 +29,51 @@
 struct event_base *evsignal_base = NULL;
 static void evsignal_handler(int sig);
 
+/*
+为evsignal来处理设置信号处理程序，使
+当我们清除当前的一个时，我们可以还原原始的处理程序。 
+*/
+static int _evsignal_set_handler(struct event_base *base,int evsignal, void (*handler)(int))
+{
+       struct sigaction sa;
+	   struct evsignal_info *sig = &base->sig;
+	    void *p;
+		if (evsignal >= sig->sh_old_max)
+			{
+		      int new_max = evsignal + 1;
+			  //增加了信号量就要重新分配信号存储的空间
+			  p = realloc(sig->sh_old, new_max * sizeof(*sig->sh_old));
+			  if (p == NULL) 
+				  {
+		        	printf("realloc error\n");
+			        return (-1);
+	              }
+		    //将重新分配的空间初始化为0
+		       memset((char *)p + sig->sh_old_max * sizeof(*sig->sh_old),
+		       0, (new_max - sig->sh_old_max) * sizeof(*sig->sh_old));
+               sig->sh_old_max = new_max;
+		       sig->sh_old = p;
+			}
+		   sig->sh_old[evsignal] = malloc(sizeof (*sig->sh_old[evsignal]));
+	       if (sig->sh_old[evsignal] == NULL)
+			 {
+		        event_warn("malloc");
+		        return (-1);
+	         }
+           //保存以前的处理程序和设置新的处理程序
+		     memset(&sa, 0, sizeof(sa));
+	         sa.sa_handler = handler;
+	         sa.sa_flags |= SA_RESTART;
+	         sigfillset(&sa.sa_mask);
+			 if (sigaction(evsignal, &sa, sig->sh_old[evsignal]) == -1) 
+				 {
+	        	   printf("sigaction error\n");
+		           free(sig->sh_old[evsignal]);
+		           sig->sh_old[evsignal] = NULL;
+		           return (-1);
+	             }
+		   return 0;
+}
 
 static void evsignal_cb(int fd, short what, void *arg)
 {
@@ -87,13 +132,69 @@ int evsignal_init(struct event_base *base)
 
 int evsignal_add(struct event *ev)
 {
-    return 1;
+     int evsignal;
+	struct event_base *base = ev->ev_base;
+	struct evsignal_info *sig = &ev->ev_base->sig;
+
+	if (ev->ev_events & (EV_READ|EV_WRITE))
+	{
+        printf("this event is not signal event\n");
+	    return -1;
+	}
+	evsignal = EVENT_SIGNAL(ev);
+	assert(evsignal >= 0 && evsignal < NSIG);
+	if (TAILQ_EMPTY(&sig->evsigevents[evsignal])) 
+		{
+		   if (_evsignal_set_handler(base, evsignal, evsignal_handler) == -1)
+			{
+		       return (-1);
+            }
+		    /* catch signals if they happen quickly */
+	     	 evsignal_base = base;
+
+		    if (!sig->ev_signal_added) //如果信号没有注册就注册 
+		    {
+			    if (event_add(&sig->ev_signal, NULL))
+			     {
+				    return (-1);
+			     }
+			     sig->ev_signal_added = 1;
+		    }
+		}
+		 //多个事件可能听同一个信号 
+       TAILQ_INSERT_TAIL(&sig->evsigevents[evsignal], ev, ev_signal_next);
+	   return 0;
 }
 
 
 void evsignal_process(struct event_base *base)
 {
-   
+    struct evsignal_info *sig = &base->sig;
+	struct event *ev, *next_ev;
+	sig_atomic_t ncalls;//这个类型是原子操作
+	int i;
+	
+	  base->sig.evsignal_caught = 0; //
+	  for (i = 1; i < NSIG; ++i) 
+	 {
+		ncalls = sig->evsigcaught[i];//每个信号触发的次数
+		if (ncalls == 0)
+		{
+			continue;
+		}
+		sig->evsigcaught[i] -= ncalls;
+
+		for (ev = TAILQ_FIRST(&sig->evsigevents[i]);ev != NULL; ev = next_ev) 
+		{
+			next_ev = TAILQ_NEXT(ev, ev_signal_next);
+			if (!(ev->ev_events & EV_PERSIST)) //不是永久事件就删除
+				{
+				   event_del(ev);
+				}
+			event_active(ev, EV_SIGNAL, ncalls); //插入活跃队列中
+		}
+
+	}
 }
 void evsignal_dealloc(struct event_base *base)
 {
