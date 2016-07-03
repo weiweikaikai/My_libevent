@@ -28,12 +28,35 @@
 
 struct event_base *evsignal_base = NULL;
 static void evsignal_handler(int sig);
+static int _evsignal_set_handler(struct event_base *base,int evsignal, void (*handler)(int));
+static int _evsignal_restore_handler(struct event_base *base, int evsignal);
+
+
+
+int _evsignal_restore_handler(struct event_base *base, int evsignal)
+{
+	int ret = 0;
+	struct evsignal_info *sig = &base->sig;
+	struct sigaction *sh;
+
+	/* restore previous handler  重新保存原来的句柄*/
+	sh = sig->sh_old[evsignal];
+	sig->sh_old[evsignal] = NULL;
+	if (sigaction(evsignal, sh, NULL) == -1)
+	{
+		printf("sigaction\n");
+		ret = -1;
+	}
+	free(sh);
+	return ret;
+}
+
 
 /*
 为evsignal来处理设置信号处理程序，使
 当我们清除当前的一个时，我们可以还原原始的处理程序。 
 */
-static int _evsignal_set_handler(struct event_base *base,int evsignal, void (*handler)(int))
+ int _evsignal_set_handler(struct event_base *base,int evsignal, void (*handler)(int))
 {
        struct sigaction sa;
 	   struct evsignal_info *sig = &base->sig;
@@ -57,7 +80,7 @@ static int _evsignal_set_handler(struct event_base *base,int evsignal, void (*ha
 		   sig->sh_old[evsignal] = malloc(sizeof (*sig->sh_old[evsignal]));
 	       if (sig->sh_old[evsignal] == NULL)
 			 {
-		        event_warn("malloc");
+		        printf("malloc\n");
 		        return (-1);
 	         }
            //保存以前的处理程序和设置新的处理程序
@@ -74,6 +97,23 @@ static int _evsignal_set_handler(struct event_base *base,int evsignal, void (*ha
 	             }
 		   return 0;
 }
+
+void evsignal_handler(int sig)
+{
+	int save_errno = errno;
+	if (evsignal_base == NULL) 
+	{
+		printf("%s: received signal %d, but have no base configured",__func__, sig);
+		return;
+	}
+
+	evsignal_base->sig.evsigcaught[sig]++;
+	evsignal_base->sig.evsignal_caught = 1;
+	/*唤醒我们的通知机制 */
+	send(evsignal_base->sig.ev_signal_pair[0], "a", 1, 0);
+	errno = save_errno;
+}
+
 
 static void evsignal_cb(int fd, short what, void *arg)
 {
@@ -196,7 +236,55 @@ void evsignal_process(struct event_base *base)
 
 	}
 }
+
+int evsignal_del(struct event *ev)
+{
+	struct event_base *base = ev->ev_base;
+	struct evsignal_info *sig = &base->sig;
+	int evsignal = EVENT_SIGNAL(ev);
+
+	assert(evsignal >= 0 && evsignal < NSIG);
+
+	/* multiple events may listen to the same signal */
+	TAILQ_REMOVE(&sig->evsigevents[evsignal], ev, ev_signal_next);
+
+	if (!TAILQ_EMPTY(&sig->evsigevents[evsignal]))
+		return (0);
+
+	printf("%s: %p: restoring signal handler", __func__, ev);
+
+	return (_evsignal_restore_handler(ev->ev_base, EVENT_SIGNAL(ev)));
+}
+
+
 void evsignal_dealloc(struct event_base *base)
 {
-  
+   int i = 0;
+	if (base->sig.ev_signal_added) 
+	{
+		event_del(&base->sig.ev_signal);
+		base->sig.ev_signal_added = 0;
+	}
+	for (i = 0; i < NSIG; ++i)
+	{
+		if (i < base->sig.sh_old_max && base->sig.sh_old[i] != NULL)
+			_evsignal_restore_handler(base, i); //还原到信号原来的属性
+	}
+
+	if (base->sig.ev_signal_pair[0] != -1) 
+	{
+		EVUTIL_CLOSESOCKET(base->sig.ev_signal_pair[0]);
+		base->sig.ev_signal_pair[0] = -1;
+	}
+	if (base->sig.ev_signal_pair[1] != -1) {
+		EVUTIL_CLOSESOCKET(base->sig.ev_signal_pair[1]);
+		base->sig.ev_signal_pair[1] = -1;
+	}
+	base->sig.sh_old_max = 0;
+
+	/* per index frees are handled in evsig_del() */
+	if (base->sig.sh_old) {
+		free(base->sig.sh_old);
+		base->sig.sh_old = NULL;
+	}
 }

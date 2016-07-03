@@ -41,3 +41,9 @@ int evutil_make_socket_nonblocking(int fd)
 		}
 		return 0;
 }
+
+int evutil_make_socket_reuseable(int sock)
+{
+	int on=1;
+ return setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,(const void*)&on,sizeof(on));
+}

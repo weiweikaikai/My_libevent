@@ -73,12 +73,12 @@ int timeout_next(struct event_base *base, struct timeval **tv_p)
 		       return (0);
 	    }
 
-	     evutil_timersub(&ev->ev_timeout, &now, tv);
+	     evutil_timersub(&ev->ev_timeout, &now, tv); //因为是单调时间将系统当前的时间与未来的超时时间相减从tv中保存返回
 
 	       assert(tv->tv_sec >= 0);
 	       assert(tv->tv_usec >= 0);
 
-	       //printf("timeout_next: in %ld seconds\n", tv->tv_sec);
+	       printf("timeout_next: in %ld seconds\n", tv->tv_sec);
 	return (0);
 }
 int event_haveevents(struct event_base *base)
@@ -162,7 +162,7 @@ void timeout_process(struct event_base *base)
 			  }
 			  /* delete this event from the I/O queues */
 		         event_del(ev);
-				 event_active(ev, EV_TIMEOUT, 1);
+				 event_active(ev, EV_TIMEOUT, 1);//将触发超时的时间重新插入活动队列
 		   }
 }
 
@@ -253,6 +253,20 @@ struct event_base* event_base_new(void)
 	   }
         return 0;
  }
+
+int event_priority_set(struct event *ev, int pri)
+{
+	if (ev->ev_flags & EVLIST_ACTIVE)
+		return (-1);
+	if (pri < 0 || pri >= ev->ev_base->nactivequeues)
+		return (-1);
+
+	ev->ev_pri = pri;
+
+	return (0);
+}
+
+
 
 int event_base_set(struct event_base *base, struct event *ev)
 {
@@ -485,7 +499,7 @@ int event_base_loop(struct event_base *base, int flags)
 			break;
 		}
 		/* You cannot use this interface for multi-threaded apps */
-		while (event_gotsig) //如果event_gotsig被设置就调用回调函数
+		while (event_gotsig) //如果event_gotsig被设置就说明已经设置了信号的回调函数
 		{
 			event_gotsig = 0;
 			if (event_sigcb) 
@@ -525,10 +539,10 @@ int event_base_loop(struct event_base *base, int flags)
 		{
 			return (-1);
 		}
-		timeout_process(base);
+		timeout_process(base); //检测时间堆，将触发超时的时间重新插入活动队列
 		if (base->event_count_active)
 		{
-			event_process_active(base);
+			event_process_active(base);//根据优先级处理活动队列中的事件
 		   if (!base->event_count_active && (flags & EVLOOP_ONCE))
 			  {
 		        break;	
@@ -542,5 +556,98 @@ int event_base_loop(struct event_base *base, int flags)
 	}
 
     return 0;
+}
+
+int event_pending(struct event *ev, short event, struct timeval *tv)
+{
+	struct timeval	now, res;
+	int flags = 0;
+
+	if (ev->ev_flags & EVLIST_INSERTED)
+		flags |= (ev->ev_events & (EV_READ|EV_WRITE|EV_SIGNAL));
+	if (ev->ev_flags & EVLIST_ACTIVE)
+		flags |= ev->ev_res;
+	if (ev->ev_flags & EVLIST_TIMEOUT)
+		flags |= EV_TIMEOUT;
+
+	event &= (EV_TIMEOUT|EV_READ|EV_WRITE|EV_SIGNAL);
+
+	/* 看看是否有一个超时，有就需要报告 */
+	if (tv != NULL && (flags & event & EV_TIMEOUT)) 
+	{
+		gettimeofday(&now,NULL);
+		evutil_timersub(&ev->ev_timeout, &now, &res);
+		/* 正确映射到真实地址 */
+		gettimeofday(&now, NULL);
+		evutil_timeradd(&now, &res, tv);
+	}
+
+	return (flags & event);
+}
+
+void event_base_free(struct event_base *base)
+{
+     int i, n_deleted=0;
+	 struct event *ev;
+
+	if (base == NULL && current_base)
+		base = current_base;
+	if (base == current_base)
+		current_base = NULL;
+
+	/* 首先检查内部事件 */
+	assert(base);
+	/* 删除所有非内部事件. */
+	for (ev = TAILQ_FIRST(&base->eventqueue); ev; ) 
+	{
+		struct event *next = TAILQ_NEXT(ev, ev_next);
+		if (!(ev->ev_flags & EVLIST_INTERNAL)) 
+		{
+			event_del(ev);
+			++n_deleted;
+		}
+		ev = next;
+	}
+	while ((ev = min_heap_top(&base->timeheap)) != NULL) 
+	{
+		event_del(ev);
+		++n_deleted;
+	}
+
+	for (i = 0; i < base->nactivequeues; ++i)
+	{
+		for (ev = TAILQ_FIRST(base->activequeues[i]); ev; ) 
+		{
+			struct event *next = TAILQ_NEXT(ev, ev_active_next);
+			if (!(ev->ev_flags & EVLIST_INTERNAL))
+			{
+				event_del(ev);
+				++n_deleted;
+			}
+			ev = next;
+		}
+	}
+
+	if (n_deleted)
+		printf("%s: %d events were still set in base",__func__, n_deleted);
+
+	if (base->evsel->dealloc != NULL)
+		base->evsel->dealloc(base, base->evbase);
+
+	for (i = 0; i < base->nactivequeues; ++i)
+		assert(TAILQ_EMPTY(base->activequeues[i]));
+
+	assert(min_heap_empty(&base->timeheap));
+	min_heap_dtor(&base->timeheap);
+
+	for (i = 0; i < base->nactivequeues; ++i)
+	{
+		free(base->activequeues[i]);
+	}
+	free(base->activequeues);
+
+	assert(TAILQ_EMPTY(&base->eventqueue));
+
+	free(base);
 }
 

@@ -31,7 +31,7 @@
 #include <sys/epoll.h>
 
 
-//epoll的读写事件
+//epoll的读写事件 IO复用中只关心读写 网络库
 struct evepoll {
 	struct event *evread;
 	struct event *evwrite;
@@ -40,7 +40,7 @@ struct evepoll {
 //epoll结构体
 struct epollop {
 	struct evepoll *fds;
-	int nfds; //监听的句柄
+	int nfds; //监听的句柄数
 	struct epoll_event *events; //epoll_init中会分配空间的
 	int nevents;//活跃的事件数
 	int epfd;//epoll定义产生的句柄
@@ -103,13 +103,33 @@ static int epoll_add(void *arg, struct event *ev);
 static int epoll_del(void *arg, struct event *ev);
 static int epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv);
 static void epoll_dealloc(struct event_base *base, void *arg);
-static intepoll_recalc(struct event_base *base, void *arg, int max);
+static int epoll_recalc(struct event_base *base, void *arg, int max);
 
 
 
 
 static int epoll_recalc(struct event_base *base, void *arg, int max)
 {
+	struct epollop *epollop = arg;
+	if(max >= epollop->nfds)
+	{
+	     struct evepoll *fds;
+		 int nfds = epollop->nfds;
+		 while(nfds <= max)
+		 {
+		    nfds <= 1; //增加为原来的2倍
+		 }
+         
+		 fds = realloc(epollop->fds,nfds*sizeof(struct evepoll));
+		 if (fds == NULL)
+		{
+			printf("realloc\n");
+			return (-1);
+		}
+        epollop->fds = fds;
+		memset(fds + epollop->nfds, 0,(nfds - epollop->nfds) * sizeof(struct evepoll));
+		epollop->nfds = nfds; //重新增加了文件描述符的个数并更新
+	}
   return 0;
 }
 static void *epoll_init(struct event_base *base)
@@ -161,7 +181,46 @@ static int epoll_add(void *arg, struct event *ev)
 	if (ev->ev_events & EV_SIGNAL) //如果是信号事件就使用信号事件的函数加入
 		{
 		  return (evsignal_add(ev));
+		}
+     fd = ev->ev_fd;
+	 if(fd >= epollop->nfds)
+	  {
+	     //现在的文件描述符大于最大数量的文件描述符个数 重新分配
+		 if(epoll_recalc(ev->ev_base,epollop,fd) == -1)
+		  {
+		   return (-1);
 		 }
+	  }
+	  evep = &epollop->fds[fd];
+	  op = EPOLL_CTL_ADD;
+	  events =0;
+	  if (evep->evread != NULL) //有数据进来就是可以读的时候
+	 {
+		events |= EPOLLIN;
+		op = EPOLL_CTL_MOD;
+	 } 
+	 if (evep->evwrite != NULL)//要写的时候也就是数据要出去的时候
+	{
+		events |= EPOLLOUT;
+		op = EPOLL_CTL_MOD;
+	}
+	if (ev->ev_events & EV_READ)
+		events |= EPOLLIN;
+	if (ev->ev_events & EV_WRITE)
+		events |= EPOLLOUT;
+
+    epev.data.fd = fd;
+	epev.events = events;
+
+	if (epoll_ctl(epollop->epfd, op, ev->ev_fd, &epev) == -1)
+	{
+	    return (-1);
+	}
+	/*跟新事件的负责*/
+    if (ev->ev_events & EV_READ)
+		evep->evread = ev;
+	if (ev->ev_events & EV_WRITE)
+		evep->evwrite = ev;
 
 	return (0);
 }
@@ -172,7 +231,7 @@ static int epoll_del(void *arg, struct event *ev)
 
 static int epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 {
-   struct epollop *epollop = arg;
+    struct epollop *epollop = arg;
 	struct epoll_event *events = epollop->events;
 	struct evepoll *evep;
 	int i, res, timeout = -1;
@@ -180,14 +239,15 @@ static int epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv
    if (tv != NULL)
 	{
 		timeout = tv->tv_sec * 1000 + (tv->tv_usec + 999) / 1000;
+		if (timeout > MAX_EPOLL_TIMEOUT_MSEC)
+	      {
+		    /* Linux kernels can wait forever if the timeout is too big;
+		    * see comment on MAX_EPOLL_TIMEOUT_MSEC. 
+		    内核会一直等下去，但是我们不希望epoll永远等下去*/
+		     timeout = MAX_EPOLL_TIMEOUT_MSEC;
+	      }
 	}
-	if (timeout > MAX_EPOLL_TIMEOUT_MSEC)
-	{
-		/* Linux kernels can wait forever if the timeout is too big;
-		 * see comment on MAX_EPOLL_TIMEOUT_MSEC. 
-		 内核会一直等下去，但是我们不希望epoll永远等下去*/
-		timeout = MAX_EPOLL_TIMEOUT_MSEC;
-	}
+	
 	res = epoll_wait(epollop->epfd, events, epollop->nevents, timeout);
 	  if(res == -1) 
 		{
@@ -230,7 +290,7 @@ static int epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv
 				      evwrite = evep->evwrite;
 			        }
 		        }
-			if (!(evread||evwrite))
+			if (!(evread || evwrite))
 			   {
 		       	 continue;
 			   }
@@ -260,5 +320,16 @@ static int epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv
 }
 static void epoll_dealloc(struct event_base *base, void *arg)
 {
-   return ;
+	struct epollop *epollop = arg;
+
+	evsignal_dealloc(base);
+	if (epollop->fds)
+		free(epollop->fds);
+	if (epollop->events)
+		free(epollop->events);
+	if (epollop->epfd >= 0)
+		close(epollop->epfd);
+
+	memset(epollop, 0, sizeof(struct epollop));
+	free(epollop);
 }

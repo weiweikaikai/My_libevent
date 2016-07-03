@@ -16,8 +16,6 @@ extern "C" {
 #include"k_evsignal.h"
 
 
-
-
 struct eventop  //事件操作结构体
 {
 	//IO复用名称

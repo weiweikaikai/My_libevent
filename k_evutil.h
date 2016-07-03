@@ -10,6 +10,7 @@
 
 int evutil_socketpair(int family, int type, int protocol, int fd[2]);
 int evutil_make_socket_nonblocking(int sock);
+int evutil_make_socket_reuseable(int sock);
 
 #define evutil_timeradd(tvp, uvp, vvp)/*最终函数返回的是将时间超时的未来时间点(这里是linux下使用的单调时间)存储在vvp中也就是event结构体中的ev_timeout中*/						\
 	do {														\
@@ -40,6 +41,6 @@ int evutil_make_socket_nonblocking(int sock);
 
 #define evutil_timerclear(tvp) (tvp)->tv_sec = (tvp)->tv_usec = 0
 
-
+#define EVUTIL_CLOSESOCKET(s) close(s)
 
 #endif
