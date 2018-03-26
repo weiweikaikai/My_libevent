@@ -53,7 +53,7 @@ struct eventop  //事件操作结构体
 	                                    用来管理信号的结构体对象 在Evsignal.h中*/
 
 	     struct event_list eventqueue;  //事件队列使用宏实现的双向链表
-	     struct timeval event_tv; //dispathc()函数返回的时间 也就是IO时间就绪的时间
+	     struct timeval event_tv; //dispathc()函数返回的时间 也就是IO就绪的时间
 
 	     struct min_heap timeheap;  //管理定时事件的小根堆对象
 

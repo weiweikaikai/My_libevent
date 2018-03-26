@@ -23,7 +23,7 @@ extern const struct eventop pollops;
 extern const struct eventop epollops;
 
 
-static const struct eventop *eventops[] = {
+static const struct eventop *eventops[] = { //这里会根据不同平台使用宏选择不同的IO复用函数结构体，之间的先后排列顺序是根据具体测测试性能进行排列的
 	&epollops,
 	&pollops,
 	&selectops,
@@ -267,7 +267,6 @@ int event_priority_set(struct event *ev, int pri)
 }
 
 
-
 int event_base_set(struct event_base *base, struct event *ev)
 {
 	/* Only innocent events may be assigned to a different base */
@@ -283,7 +282,7 @@ int event_base_set(struct event_base *base, struct event *ev)
 }
 
 
- void event_set(struct event *ev, int fd, short events,
+void event_set(struct event *ev, int fd, short events,
 	  void (*callback)(int, short, void *), void *arg)
 {
 	/* Take the current base - caller needs to set the real base later */
@@ -331,7 +330,7 @@ int event_add(struct event *ev, const struct timeval *timeout)
          res = evsel->add(evbase, ev);//活跃的首先加入IO复用的管理中
 		if (res != -1)
 			{
-			event_queue_insert(base, ev, EVLIST_INSERTED);
+			  event_queue_insert(base, ev, EVLIST_INSERTED);
 			}
     }
 	//只有在前边添加事件成功的时候再改变超时状态

@@ -173,14 +173,11 @@ struct bufferevent
 	short enabled;	/* 当前已启用的事件*/
 };
 
-
-
-
-
 #define EVBUFFER_LENGTH(x)	(x)->off
 #define EVBUFFER_DATA(x)	(x)->buffer
 #define EVBUFFER_INPUT(x)	(x)->input
 #define EVBUFFER_OUTPUT(x)	(x)->output
+
 
 //k_evbuffer.c中
 

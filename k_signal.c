@@ -201,7 +201,7 @@ int evsignal_add(struct event *ev)
 			     sig->ev_signal_added = 1;
 		    }
 		}
-		 //多个事件可能听同一个信号 
+		 //多个事件可能听同一个信号，所以链表几点数组中每个元素底下都连接着等待该信号的事件
        TAILQ_INSERT_TAIL(&sig->evsigevents[evsignal], ev, ev_signal_next);
 	   return 0;
 }
